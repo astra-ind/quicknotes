@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark">
+<title>Video call</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Instrument+Sans:wght@400..600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #121019;
+    --panel: #1b1826;
+    --panel-2: #262238;
+    --line: rgba(255,255,255,.09);
+    --text: #f0ecf3;
+    --muted: #a19bb3;
+    --accent: #a9bfff;
+    --rose: #ff8fa3;
+    --danger: #ff6b81;
+    --amber: #f3c969;
+    --green: #7ee2a8;
+    --display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+    --body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font: 400 16px/1.5 var(--body);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- Lobby ---------- */
+  #lobby {
+    position: fixed; inset: 0;
+    display: grid; place-items: center;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+  #orbs { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .card {
+    position: relative;
+    width: min(100%, 420px);
+    background: rgba(27,24,38,.82);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 30px 28px 24px;
+    display: grid; gap: 16px;
+  }
+  .card h1 {
+    font: 600 clamp(28px, 6vw, 34px)/1.08 var(--display);
+    letter-spacing: -.02em;
+    margin: 0;
+  }
+  .lede { margin: -6px 0 2px; color: var(--muted); font-size: 15px; }
+  label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+  input, select {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 16px;
+  }
+  select { appearance: none; -webkit-appearance: none; }
+  .pw { position: relative; display: block; }
+  .pw input { padding-right: 70px; }
+  .pw button {
+    position: absolute; right: 6px; top: 6px; bottom: 6px;
+    background: none; border: 0; color: var(--accent);
+    padding: 0 10px; border-radius: 8px; font-size: 14px;
+  }
+  .primary {
+    background: var(--accent); color: #141226;
+    border: 0; border-radius: 12px;
+    padding: 13px 18px; font-weight: 600; font-size: 16px;
+  }
+  .primary:disabled { opacity: .6; cursor: default; }
+  #lobbyError { margin: 0; min-height: 0; color: var(--danger); font-size: 14px; }
+  #lobbyError:empty { display: none; }
+  .fine { margin: 0; color: var(--muted); font-size: 13px; }
+
+  /* ---------- Call ---------- */
+  #call { position: fixed; inset: 0; display: flex; background: #000; }
+  .stage { position: relative; flex: 1; min-width: 0; overflow: hidden; background: #0a090f; }
+  #remoteVideo { width: 100%; height: 100%; object-fit: cover; background: #0a090f; display: block; }
+
+  .overlay {
+    position: absolute; inset: 0; z-index: 2;
+    display: grid; place-content: center; justify-items: center; gap: 8px;
+    text-align: center; padding: 24px;
+    background: radial-gradient(60% 60% at 50% 45%, #1d1930 0%, #0a090f 100%);
+  }
+  .overlay h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -.01em; }
+  .overlay p { margin: 0; color: var(--muted); max-width: 32ch; }
+  button.overlay { border: 0; color: var(--text); font: 600 20px var(--display); background: rgba(10,9,15,.86); }
+  .pulse { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); margin-bottom: 10px; animation: pulse 1.8s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(169,191,255,.55); } 100% { box-shadow: 0 0 0 26px rgba(169,191,255,0); } }
+
+  .topbar {
+    position: absolute; z-index: 4;
+    top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+    pointer-events: none;
+  }
+  .topbar > * { pointer-events: auto; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(18,16,25,.68);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 13px; font-size: 14px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+  .dot.live { background: var(--green); }
+  .dot.bad { background: var(--danger); }
+  .timerwrap { position: relative; }
+  #timerBtn { font-variant-numeric: tabular-nums; }
+  #timerBtn.urgent { border-color: var(--rose); color: var(--rose); }
+  .menu {
+    position: absolute; right: 0; top: calc(100% + 8px);
+    min-width: 190px; padding: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    display: grid;
+  }
+  .menu button {
+    background: none; border: 0; text-align: left; padding: 10px 12px; border-radius: 9px; font-size: 15px;
+  }
+  .menu button:hover { background: var(--panel-2); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+
+  .badges { position: absolute; z-index: 3; left: 12px; bottom: calc(96px + env(safe-area-inset-bottom)); display: flex; gap: 6px; flex-wrap: wrap; }
+  .badges span { background: rgba(18,16,25,.72); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+
+  .pip {
+    position: absolute; z-index: 3;
+    right: 12px; bottom: calc(96px + env(safe-area-inset-bottom));
+    width: clamp(92px, 22vw, 190px); aspect-ratio: 3 / 4;
+    border-radius: 16px; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--line);
+    box-shadow: 0 8px 28px rgba(0,0,0,.4);
+  }
+  .pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+  .pip span { position: absolute; inset: 0; display: grid; place-items: center; background: var(--panel); color: var(--muted); font-size: 13px; }
+
+  .controls {
+    position: absolute; z-index: 4; left: 50%; transform: translateX(-50%);
+    bottom: max(16px, env(safe-area-inset-bottom));
+    display: flex; gap: 10px; align-items: center;
+    padding: 8px;
+    background: rgba(18,16,25,.72);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+  }
+  .ctl {
+    position: relative;
+    width: 50px; height: 50px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--panel-2); border: 1px solid transparent;
+  }
+  .ctl svg, .end svg, .pill svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .pill svg { width: 16px; height: 16px; }
+  .ctl .slash { opacity: 0; }
+  .ctl.off { background: #3a2230; color: var(--rose); }
+  .ctl.off .slash { opacity: 1; }
+  .ctl:disabled { opacity: .4; cursor: default; }
+  .ctl .unread { position: absolute; top: 8px; right: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--rose); border: 2px solid var(--panel-2); }
+  .end {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 50px; padding: 0 18px 0 14px; border-radius: 999px;
+    background: var(--danger); color: #26060d; border: 0; font-weight: 600; font-size: 15px;
+  }
+
+  .chat {
+    width: 340px; flex: none;
+    display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--line);
+    padding-top: env(safe-area-inset-top);
+  }
+  #call:not(.chat-open) .chat { display: none; }
+  .chat header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .chat h2 { margin: 0; font: 600 18px var(--display); }
+  .chat header button { background: none; border: 0; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; }
+  .chat header button:hover { background: var(--panel-2); }
+  .chat header svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .log:empty::before { content: "Messages stay in this call only. They disappear when it ends."; color: var(--muted); font-size: 14px; }
+  .msg { max-width: 86%; display: grid; gap: 2px; }
+  .msg p { margin: 0; padding: 9px 13px; border-radius: 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .msg time { font-size: 11px; color: var(--muted); padding: 0 6px; }
+  .msg.mine { align-self: flex-end; justify-items: end; }
+  .msg.mine p { background: var(--accent); color: #141226; border-bottom-right-radius: 5px; }
+  .msg.theirs { align-self: flex-start; }
+  .msg.theirs p { background: var(--panel-2); border-bottom-left-radius: 5px; }
+  #chatForm { display: flex; gap: 8px; padding: 12px 12px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  #chatForm button { flex: none; width: 46px; border-radius: 12px; border: 0; background: var(--accent); color: #141226; display: grid; place-items: center; }
+  #chatForm svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  #toast {
+    position: absolute; z-index: 30; left: 50%; top: max(64px, calc(env(safe-area-inset-top) + 56px));
+    transform: translate(-50%, -8px); opacity: 0; pointer-events: none;
+    background: var(--panel-2); border: 1px solid var(--line);
+    padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: min(90vw, 380px); text-align: center;
+    transition: opacity .2s, transform .2s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 720px) {
+    .chat { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: min(100%, 400px); box-shadow: -12px 0 40px rgba(0,0,0,.5); }
+    .end span { display: none; }
+    .end { padding: 0 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse { animation: none; }
+    #toast { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ Lobby ============ -->
+<main id="lobby">
+  <canvas id="orbs" aria-hidden="true"></canvas>
+  <form id="joinForm" class="card" autocomplete="off">
+    <h1>Two people, one room</h1>
+    <p class="lede">Choose a room name and password. Whoever arrives first waits; the other joins with the same details.</p>
+
+    <label>Room name
+      <input id="room" name="room" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="60" required>
+    </label>
+
+    <label>Password
+      <span class="pw">
+        <input id="pass" name="pass" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" required>
+        <button type="button" id="showPw" aria-label="Show password">Show</button>
+      </span>
+    </label>
+
+    <label>End the call after no activity for
+      <select id="idle">
+        <option value="0">Never</option>
+        <option value="10">10 minutes</option>
+        <option value="20">20 minutes</option>
+        <option value="30">30 minutes</option>
+      </select>
+    </label>
+
+    <p id="lobbyError" role="alert"></p>
+    <button id="joinBtn" class="primary" type="submit">Join room</button>
+    <p class="fine">Video, audio and chat go straight between your browsers, encrypted, and aren't saved anywhere.</p>
+  </form>
+</main>
+
+<!-- ============ Call ============ -->
+<section id="call" hidden>
+  <div class="stage">
+    <video id="remoteVideo" autoplay playsinline></video>
+
+    <div id="waiting" class="overlay">
+      <div class="pulse"></div>
+      <h2>Waiting for the other person</h2>
+      <p>They need to join with the same room name and password.</p>
+    </div>
+    <button id="tapPlay" class="overlay" type="button" hidden>Tap to start the call</button>
+
+    <div class="topbar">
+      <div class="pill" role="status"><span id="dot" class="dot"></span><span id="statusText">Starting…</span></div>
+      <div class="timerwrap">
+        <button id="timerBtn" class="pill" type="button" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span id="timerText">No timer</span>
+        </button>
+        <div id="timerMenu" class="menu" hidden>
+          <button type="button" data-set="30">End in 30 minutes</button>
+          <button type="button" data-set="60">End in 1 hour</button>
+          <button type="button" data-set="120">End in 2 hours</button>
+          <hr>
+          <button type="button" data-add="15">Add 15 minutes</button>
+          <button type="button" data-clear="1">Remove timer</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="badges" class="badges"></div>
+
+    <div class="pip">
+      <video id="localVideo" autoplay playsinline muted></video>
+      <span id="pipOff" hidden>Camera off</span>
+    </div>
+
+    <div class="controls">
+      <button id="micBtn" class="ctl" type="button" aria-label="Mute microphone" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line class="slash" x1="3" y1="3" x2="21" y2="21"/></svg>
+      </button>
+      <button id="camBtn" class="ctl" type="button" aria-label="Turn camera off" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/><line class="slash" x1="3" y1="3" x2="21" y2="21"/></svg>
+      </button>
+      <button id="chatBtn" class="ctl" type="button" aria-label="Open chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <i id="unreadDot" class="unread" hidden></i>
+      </button>
+      <button id="endBtn" class="end" type="button" title="End the call for both of you">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        <span>End for everyone</span>
+      </button>
+    </div>
+  </div>
+
+  <aside id="chat" class="chat" aria-label="Chat">
+    <header>
+      <h2>Chat</h2>
+      <button id="closeChat" type="button" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </header>
+    <div id="chatLog" class="log" aria-live="polite"></div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="2000" placeholder="Write a message" aria-label="Message">
+      <button type="submit" aria-label="Send message">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+      </button>
+    </form>
+  </aside>
+
+  <div id="toast" role="status"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+
+/* =====================================================================
+   SETTINGS: edit these
+   ===================================================================== */
+const CONFIG = {
+  // Where both browsers go when the call ends.
+  REDIRECT_URL: 'https://www.google.com',
+
+  // Free TURN relay (Metered Open Relay) so calls connect across countries,
+  // mobile data and strict networks. Fill in both values after signing up
+  // at https://www.metered.ca/tools/openrelay/ :
+  //   APP     = your app name, the part before ".metered.live"
+  //   API_KEY = the API key shown next to your TURN credential
+  // (This key only fetches relay credentials, so it's fine in a public page.)
+  METERED: {
+    APP: '',
+    API_KEY: '',
+  },
+
+  // Always used. STUN alone works on many home networks; TURN (above) covers the rest.
+  // You can also paste your own TURN server here instead:
+  //   { urls: 'turn:HOST:443?transport=tcp', username: 'USER', credential: 'PASS' }
+  ICE_SERVERS: [
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'turn:global.relay.metered.ca:80', username: 'c52f759f5b0dc3fc0b905c46', credential: '2sScfbdvMeiJs1CC' },
+    { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'c52f759f5b0dc3fc0b905c46', credential: '2sScfbdvMeiJs1CC' },
+    { urls: 'turn:global.relay.metered.ca:443', username: 'c52f759f5b0dc3fc0b905c46', credential: '2sScfbdvMeiJs1CC' },
+    { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c52f759f5b0dc3fc0b905c46', credential: '2sScfbdvMeiJs1CC' },
+  ],
+
+  PBKDF2_ITERATIONS: 200000, // slows down password guessing
+  WARN_SECONDS: 60,          // timer warning
+};
+
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $ = (s) => document.querySelector(s);
+const enc = new TextEncoder();
+const toHex = (buf) => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const randB64 = () => toB64(crypto.getRandomValues(new Uint8Array(16)));
+
+// The room name + password produce (a) the host's PeerJS id and (b) a secret
+// key used for a mutual challenge/response check before any media flows.
+async function deriveKeys(room, password) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'PBKDF2',
+    salt: enc.encode('vc-room:' + room.trim().toLowerCase()),
+    iterations: CONFIG.PBKDF2_ITERATIONS,
+    hash: 'SHA-256',
+  }, base, 384);
+  const bytes = new Uint8Array(bits);
+  const hmacKey = await crypto.subtle.importKey('raw', bytes.slice(16, 48), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return { peerId: 'vc' + toHex(bytes.slice(0, 16)), hmacKey };
+}
+const mac = async (key, msg) => toB64(await crypto.subtle.sign('HMAC', key, enc.encode(msg)));
+
+/* =====================================================================
+   ICE servers (STUN + optional TURN relay)
+   ===================================================================== */
+let iceServers = CONFIG.ICE_SERVERS;
+
+async function loadIceServers() {
+  const { APP, API_KEY } = CONFIG.METERED;
+  if (!APP || !API_KEY) {
+    if (!CONFIG.ICE_SERVERS.some(s => String(s.urls).startsWith('turn'))) {
+      console.warn('No TURN relay configured. Calls may fail across some networks.');
+    }
+    return CONFIG.ICE_SERVERS;
+  }
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
+    const res = await fetch('https://' + encodeURIComponent(APP) + '.metered.live/api/v1/turn/credentials?apiKey=' + encodeURIComponent(API_KEY), { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    if (!Array.isArray(list) || !list.length) throw new Error('empty response');
+    return [...CONFIG.ICE_SERVERS, ...list];
+  } catch (e) {
+    console.warn('Could not load TURN credentials, using STUN only:', e);
+    return CONFIG.ICE_SERVERS;
+  }
+}
+
+/* =====================================================================
+   State
+   ===================================================================== */
+let localStream = null, keys = null;
+let peer = null, conn = null, mediaCall = null, pendingCall = null;
+let role = null, authed = false, hostNonce = '', guestNonce = '';
+let attemptId = 0, retryTimer = null, authTimer = null, inbox = Promise.resolve();
+let micOn = true, camOn = true;
+let endAt = null, warned = false;
+let idleMin = 0, lastActive = Date.now(), idleWarned = false;
+let ending = false, wakeLock = null, unread = 0, chatOpen = false, tickerId = null;
+
+/* =====================================================================
+   Lobby
+   ===================================================================== */
+$('#showPw').addEventListener('click', () => {
+  const p = $('#pass'), show = p.type === 'password';
+  p.type = show ? 'text' : 'password';
+  $('#showPw').textContent = show ? 'Hide' : 'Show';
+});
+
+$('#joinForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('#lobbyError'), btn = $('#joinBtn');
+  err.textContent = '';
+  const room = $('#room').value.trim(), pass = $('#pass').value;
+  if (room.length < 3) { err.textContent = 'Room name needs at least 3 characters.'; return; }
+  if (pass.length < 6) { err.textContent = 'Password needs at least 6 characters.'; return; }
+  if (typeof Peer === 'undefined') { err.textContent = 'Could not load the call library. Check your connection and reload.'; return; }
+  if (!navigator.mediaDevices || !window.isSecureContext) { err.textContent = 'Calls need a secure (https) page.'; return; }
+
+  btn.disabled = true; btn.textContent = 'Getting ready…';
+  try {
+    localStream = await getMedia();
+    keys = await deriveKeys(room, pass);
+    iceServers = await loadIceServers();
+  } catch (ex) {
+    err.textContent = (ex && (ex.name === 'NotAllowedError' || ex.name === 'SecurityError'))
+      ? 'Camera and microphone access was blocked. Allow it in your browser settings, then try again.'
+      : 'Could not start your camera or microphone.';
+    btn.disabled = false; btn.textContent = 'Join room';
+    return;
+  }
+  idleMin = parseInt($('#idle').value, 10) || 0;
+  enterCall();
+});
+
+async function getMedia() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (e) {
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
+    return await navigator.mediaDevices.getUserMedia({ audio: true }); // no camera: audio only
+  }
+}
+
+// Two orbs drift toward each other behind the lobby form.
+(function orbs() {
+  const cv = $('#orbs'), ctx = cv.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let w = 0, h = 0, t = 1.2;
+  function size() {
+    const r = window.devicePixelRatio || 1;
+    w = cv.width = Math.floor(innerWidth * r);
+    h = cv.height = Math.floor(innerHeight * r);
+    if (reduce) draw(true);
+  }
+  function blob(x, y, r, rgb) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(' + rgb + ',.5)');
+    g.addColorStop(1, 'rgba(' + rgb + ',0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  function draw(once) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'lighter';
+    const closeness = reduce ? 0.55 : (Math.sin(t) * 0.5 + 0.5);
+    const gap = w * (0.40 - 0.28 * closeness);
+    const R = Math.min(w, h) * 0.34, sway = h * 0.06 * Math.sin(t * 0.7);
+    blob(w / 2 - gap, h * 0.5 - sway, R, '169,191,255');
+    blob(w / 2 + gap, h * 0.5 + sway, R, '255,143,163');
+    t += 0.004;
+    if (once === true || reduce || $('#lobby').hidden) return;
+    requestAnimationFrame(draw);
+  }
+  addEventListener('resize', size);
+  size();
+  if (!reduce) draw();
+})();
+
+/* =====================================================================
+   Entering the call
+   ===================================================================== */
+function enterCall() {
+  $('#lobby').hidden = true;
+  $('#call').hidden = false;
+  $('#localVideo').srcObject = localStream;
+  if (!localStream.getVideoTracks().length) { camOn = false; $('#camBtn').disabled = true; }
+  syncButtons();
+  tickerId = setInterval(tick, 500);
+  ['pointerdown', 'pointermove', 'keydown', 'touchstart'].forEach(ev =>
+    addEventListener(ev, () => { lastActive = Date.now(); idleWarned = false; }, { passive: true }));
+  startAttempt(false);
+}
+
+/* =====================================================================
+   Connection: whoever claims the room's id first is the host; the other
+   becomes the guest. Failures loop back and try again.
+   ===================================================================== */
+function killPeer() {
+  clearTimeout(retryTimer); clearTimeout(authTimer);
+  try { mediaCall && mediaCall.close(); } catch (e) {}
+  try { conn && conn.close(); } catch (e) {}
+  try { peer && peer.destroy(); } catch (e) {}
+  peer = conn = mediaCall = pendingCall = null;
+  authed = false; role = null;
+}
+
+function startAttempt(asGuest) {
+  const id = ++attemptId;              // invalidates callbacks from older attempts
+  killPeer();
+  const live = () => id === attemptId && !ending;
+  setStatus('wait', 'Waiting for the other person…');
+  showWaiting(true);
+  if (asGuest) tryGuest(live); else tryHost(live);
+}
+
+function retrySoon(ms, asGuest) {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => startAttempt(!!asGuest), ms);
+}
+
+function onPeerError(err) {
+  if (err.type === 'browser-incompatible') { setStatus('bad', 'This browser can’t make video calls.'); return; }
+  setStatus('wait', 'Connection problem. Retrying…');
+  retrySoon(3000, false);
+}
+
+function tryHost(live) {
+  const p = new Peer(keys.peerId, { config: { iceServers } });
+  peer = p; role = 'host';
+  p.on('open', () => { if (live()) setStatus('wait', 'Waiting for the other person…'); });
+  p.on('connection', (c) => { if (live()) hostOnConnection(c, live); else c.close(); });
+  p.on('call', (c) => c.close());
+  p.on('disconnected', () => { if (live()) { try { p.reconnect(); } catch (e) {} } });
+  p.on('error', (err) => {
+    if (!live()) return;
+    if (err.type === 'unavailable-id') startAttempt(true);   // someone is already hosting
+    else onPeerError(err);
+  });
+}
+
+function tryGuest(live) {
+  const p = new Peer({ config: { iceServers } });
+  peer = p; role = 'guest';
+  p.on('open', () => {
+    if (!live()) return;
+    setStatus('wait', 'Connecting…');
+    const c = p.connect(keys.peerId, { reliable: true });
+    conn = c;
+    wireConn(c, live);
+    retryTimer = setTimeout(() => { if (live() && !authed) startAttempt(false); }, 12000);
+  });
+  p.on('call', (c) => {
+    if (!live()) { c.close(); return; }
+    if (authed) answerCall(c, live); else pendingCall = c;
+  });
+  p.on('error', (err) => {
+    if (!live()) return;
+    if (err.type === 'peer-unavailable') retrySoon(1500, false); // host vanished; try hosting
+    else onPeerError(err);
+  });
+}
+
+function hostOnConnection(c, live) {
+  if (conn && conn.open) {                       // room already has two people
+    const bounce = () => { try { c.send({ t: 'busy' }); } catch (e) {} setTimeout(() => c.close(), 150); };
+    if (c.open) bounce(); else c.on('open', bounce);
+    return;
+  }
+  conn = c; authed = false;
+  hostNonce = randB64();
+  wireConn(c, live);
+  const challenge = () => c.send({ t: 'challenge', n: hostNonce });
+  if (c.open) challenge(); else c.on('open', challenge);
+  clearTimeout(authTimer);
+  authTimer = setTimeout(() => {
+    if (live() && !authed && conn === c) { try { c.close(); } catch (e) {} conn = null; }
+  }, 10000);
+}
+
+function wireConn(c, live) {
+  // Messages are handled one at a time, in order (auth uses async crypto).
+  c.on('data', (d) => { inbox = inbox.then(() => (live() && c === conn) ? onData(d, live) : null).catch(() => {}); });
+  c.on('close', () => { if (live() && c === conn) onPeerGone(); });
+  c.on('error', () => { if (live() && c === conn) onPeerGone(); });
+}
+
+function wireCall(call, live) {
+  call.on('stream', (s) => { if (live()) showRemote(s); });
+  call.on('close', () => { if (live() && call === mediaCall) onPeerGone(); });
+  call.on('error', () => { if (live() && call === mediaCall) onPeerGone(); });
+}
+
+function answerCall(call, live) {
+  call.answer(localStream);
+  mediaCall = call;
+  wireCall(call, live);
+}
+
+function onPeerGone() {
+  if (ending) return;
+  if (!authed) { conn = null; return; }          // unverified visitor left; keep waiting
+  setStatus('wait', 'Connection lost. Reconnecting…');
+  $('#remoteVideo').srcObject = null;
+  $('#badges').textContent = '';
+  showWaiting(true);
+  retrySoon(1000, false);
+}
+
+/* =====================================================================
+   Messages between the two browsers
+   ===================================================================== */
+async function onData(m, live) {
+  if (!m || typeof m !== 'object') return;
+
+  if (!authed) {
+    if (role === 'host' && m.t === 'auth') {
+      if (typeof m.m !== 'string' || typeof m.n !== 'string' || m.n.length > 64) { conn && conn.close(); return; }
+      const expect = await mac(keys.hmacKey, 'g|' + hostNonce);
+      if (!live() || !conn || authed) return;
+      if (expect !== m.m) {
+        try { conn.send({ t: 'deny' }); } catch (e) {}
+        const bad = conn; conn = null;
+        setTimeout(() => { try { bad.close(); } catch (e) {} }, 150);
+        return;
+      }
+      authed = true; clearTimeout(authTimer);
+      conn.send({ t: 'authok', m: await mac(keys.hmacKey, 'h|' + m.n) });
+      mediaCall = peer.call(conn.peer, localStream);
+      wireCall(mediaCall, live);
+      afterAuth();
+    } else if (role === 'guest') {
+      if (m.t === 'challenge' && typeof m.n === 'string' && m.n.length <= 64) {
+        guestNonce = randB64();
+        conn.send({ t: 'auth', m: await mac(keys.hmacKey, 'g|' + m.n), n: guestNonce });
+      } else if (m.t === 'authok') {
+        const expect = await mac(keys.hmacKey, 'h|' + guestNonce);
+        if (!live() || !conn) return;
+        if (expect !== m.m) { setStatus('bad', 'Could not verify the other side. Leave and try again.'); return; }
+        authed = true; clearTimeout(retryTimer);
+        if (pendingCall) { answerCall(pendingCall, live); pendingCall = null; }
+        afterAuth();
+      } else if (m.t === 'busy') {
+        setStatus('bad', 'That room already has two people in it.');
+      }
+    }
+    return;
+  }
+
+  switch (m.t) {
+    case 'chat':
+      if (typeof m.text === 'string') addMsg(m.text.slice(0, 2000), false);
+      break;
+    case 'timer':
+      applyTimer(typeof m.ms === 'number' ? Math.max(0, m.ms) : null);
+      break;
+    case 'state':
+      renderBadges(m.mic !== false, m.cam !== false);
+      break;
+    case 'end':
+      cleanupAndLeave();
+      break;
+  }
+}
+
+const send = (obj) => { if (authed && conn && conn.open) { try { conn.send(obj); } catch (e) {} } };
+function afterAuth() { sendState(); if (endAt) sendTimer(); }
+function sendState() { send({ t: 'state', mic: micOn, cam: camOn }); }
+function sendTimer() { send({ t: 'timer', ms: endAt ? Math.max(0, endAt - Date.now()) : null }); }
+
+/* =====================================================================
+   Remote video
+   ===================================================================== */
+function showRemote(stream) {
+  const v = $('#remoteVideo');
+  v.srcObject = stream;
+  v.play().then(() => { $('#tapPlay').hidden = true; }).catch(() => { $('#tapPlay').hidden = false; });
+  showWaiting(false);
+  setStatus('live', 'Connected');
+  requestWake();
+}
+$('#tapPlay').addEventListener('click', () => {
+  $('#remoteVideo').play().then(() => { $('#tapPlay').hidden = true; }).catch(() => {});
+});
+
+function showWaiting(on) { $('#waiting').hidden = !on; if (on) $('#tapPlay').hidden = true; }
+
+function setStatus(kind, text) {
+  $('#dot').className = 'dot' + (kind === 'live' ? ' live' : kind === 'bad' ? ' bad' : '');
+  $('#statusText').textContent = text;
+}
+
+function renderBadges(mic, cam) {
+  const b = $('#badges'); b.textContent = '';
+  if (!mic) { const s = document.createElement('span'); s.textContent = 'Microphone off'; b.append(s); }
+  if (!cam) { const s = document.createElement('span'); s.textContent = 'Camera off'; b.append(s); }
+}
+
+/* =====================================================================
+   Controls
+   ===================================================================== */
+function syncButtons() {
+  const mic = $('#micBtn'), cam = $('#camBtn');
+  mic.classList.toggle('off', !micOn);
+  mic.setAttribute('aria-pressed', String(!micOn));
+  mic.setAttribute('aria-label', micOn ? 'Mute microphone' : 'Unmute microphone');
+  cam.classList.toggle('off', !camOn);
+  cam.setAttribute('aria-pressed', String(!camOn));
+  cam.setAttribute('aria-label', camOn ? 'Turn camera off' : 'Turn camera on');
+  $('#pipOff').hidden = camOn;
+}
+$('#micBtn').addEventListener('click', () => {
+  micOn = !micOn;
+  localStream.getAudioTracks().forEach(t => { t.enabled = micOn; });
+  syncButtons(); sendState();
+});
+$('#camBtn').addEventListener('click', () => {
+  camOn = !camOn;
+  localStream.getVideoTracks().forEach(t => { t.enabled = camOn; });
+  syncButtons(); sendState();
+});
+$('#endBtn').addEventListener('click', endForEveryone);
+
+/* ---------- Ending the call ---------- */
+function endForEveryone() {
+  if (ending) return;
+  send({ t: 'end' });
+  setTimeout(cleanupAndLeave, 250);
+}
+
+function cleanupAndLeave() {
+  if (ending) return;
+  ending = true;
+  clearInterval(tickerId); clearTimeout(retryTimer); clearTimeout(authTimer);
+  try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  try { mediaCall && mediaCall.close(); } catch (e) {}
+  try { conn && conn.close(); } catch (e) {}
+  try { peer && peer.destroy(); } catch (e) {}
+  try { wakeLock && wakeLock.release(); } catch (e) {}
+  document.body.textContent = '';                 // wipe the page (video, chat) first
+  location.replace(CONFIG.REDIRECT_URL);          // replace: no Back-button return
+}
+addEventListener('pagehide', () => {
+  try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  try { peer && peer.destroy(); } catch (e) {}
+});
+
+/* ---------- Screen wake lock ---------- */
+async function requestWake() {
+  try {
+    if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && authed) requestWake(); });
+
+/* =====================================================================
+   Shared timer (either person can set or extend it)
+   ===================================================================== */
+function fmt(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return (h ? h + ':' + pad(m) : String(m)) + ':' + pad(sec);
+}
+function applyTimer(ms) { endAt = ms == null ? null : Date.now() + ms; warned = false; renderTimer(); }
+function changeTimer(ms) { applyTimer(ms); sendTimer(); }
+function renderTimer() {
+  const btn = $('#timerBtn'), txt = $('#timerText');
+  if (!endAt) { txt.textContent = 'No timer'; btn.classList.remove('urgent'); return; }
+  const rem = endAt - Date.now();
+  txt.textContent = fmt(rem);
+  btn.classList.toggle('urgent', rem <= CONFIG.WARN_SECONDS * 1000);
+}
+
+const menu = $('#timerMenu'), timerBtn = $('#timerBtn');
+function toggleMenu(open) {
+  menu.hidden = !open;
+  timerBtn.setAttribute('aria-expanded', String(open));
+}
+timerBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(menu.hidden); });
+document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) toggleMenu(false); });
+menu.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.set) changeTimer(parseInt(b.dataset.set, 10) * 60000);
+  else if (b.dataset.add) {
+    const rem = endAt ? Math.max(0, endAt - Date.now()) : 0;
+    changeTimer(rem + parseInt(b.dataset.add, 10) * 60000);
+    toast('Added 15 minutes');
+  } else if (b.dataset.clear) changeTimer(null);
+  toggleMenu(false);
+});
+
+/* ---------- Ticker: timer + inactivity ---------- */
+function tick() {
+  if (ending) return;
+  if (endAt) {
+    const rem = endAt - Date.now();
+    renderTimer();
+    if (rem <= CONFIG.WARN_SECONDS * 1000 && !warned) { warned = true; toast('The call ends in 1 minute. Open the timer to add more.'); }
+    if (rem <= 0) { endForEveryone(); return; }
+  }
+  if (idleMin) {
+    const limit = idleMin * 60000, idle = Date.now() - lastActive;
+    if (idle >= limit) { endForEveryone(); return; }
+    if (!idleWarned && limit - idle <= 30000) { idleWarned = true; toast('Still there? The call ends in 30 seconds without activity.'); }
+  }
+}
+
+/* =====================================================================
+   Chat
+   ===================================================================== */
+function setChat(open) {
+  chatOpen = open;
+  $('#call').classList.toggle('chat-open', open);
+  if (open) { unread = 0; $('#unreadDot').hidden = true; setTimeout(() => $('#chatInput').focus(), 50); }
+}
+$('#chatBtn').addEventListener('click', () => setChat(!chatOpen));
+$('#closeChat').addEventListener('click', () => setChat(false));
+
+$('#chatForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = $('#chatInput'), text = input.value.trim();
+  if (!text) return;
+  if (!authed || !conn || !conn.open) { toast('Not connected yet'); return; }
+  send({ t: 'chat', text });
+  addMsg(text, true);
+  input.value = '';
+  lastActive = Date.now();
+});
+
+function addMsg(text, mine) {
+  const box = document.createElement('div');
+  box.className = 'msg ' + (mine ? 'mine' : 'theirs');
+  const p = document.createElement('p'); p.textContent = text;         // textContent: never HTML
+  const t = document.createElement('time');
+  t.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  box.append(p, t);
+  const log = $('#chatLog');
+  log.append(box);
+  log.scrollTop = log.scrollHeight;
+  if (!mine && !chatOpen) { unread++; $('#unreadDot').hidden = false; }
+}
+
+/* =====================================================================
+   Small UI bits
+   ===================================================================== */
+let toastTimer = null;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!menu.hidden) toggleMenu(false); else if (chatOpen) setChat(false);
+});
+</script>
+</body>
+</html>

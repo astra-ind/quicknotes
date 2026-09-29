@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quick Notes</title>
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #111;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+    h1 { font-size: 1.3rem; margin-bottom: 12px; opacity: 0.7; }
+    #setup, #call-ui { width: 100%; max-width: 640px; }
+    .row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    input, button, select {
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #222;
+      color: #eee;
+      font-size: 15px;
+    }
+    input { flex: 1; min-width: 140px; }
+    button { cursor: pointer; background: #333; }
+    button:hover { background: #444; }
+    button.danger { background: #a33; }
+    button.danger:hover { background: #c44; }
+    button.active { background: #2a5; }
+    #status { margin: 8px 0 16px; font-size: 14px; color: #aaa; min-height: 20px; }
+    #videos {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+    }
+    #remoteVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+    #localVideo {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      width: 28%;
+      max-width: 180px;
+      border-radius: 8px;
+      border: 2px solid #333;
+      object-fit: cover;
+      background: #222;
+    }
+    #controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .hidden { display: none !important; }
+    label { font-size: 14px; color: #aaa; display: flex; align-items: center; gap: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Quick Notes</h1>
+
+  <div id="setup">
+    <div class="row">
+      <input id="myId" readonly placeholder="Your ID will appear here" />
+      <button id="copyIdBtn">Copy ID</button>
+    </div>
+    <div class="row">
+      <input id="remoteId" placeholder="Paste their ID here" />
+      <button id="callBtn">Call</button>
+    </div>
+    <div class="row">
+      <label>
+        Inactivity timer (minutes, 0 = off):
+        <input id="timerMinutes" type="number" min="0" max="120" value="15" style="width:70px" />
+      </label>
+    </div>
+    <p id="status">Waiting for PeerJS…</p>
+  </div>
+
+  <div id="call-ui" class="hidden">
+    <div id="videos">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+    <div id="controls">
+      <button id="muteBtn">Mute</button>
+      <button id="camBtn">Camera Off</button>
+      <button id="endBtn" class="danger">End call for everyone</button>
+    </div>
+    <p id="callStatus" style="text-align:center;margin-top:12px;color:#aaa;font-size:14px"></p>
+  </div>
+
+  <script>
+    const REDIRECT_URL = 'https://www.google.com';
+
+    let peer = null;
+    let localStream = null;
+    let currentCall = null;
+    let isMuted = false;
+    let isCamOff = false;
+    let inactivityTimer = null;
+    let lastActivity = Date.now();
+
+    const $ = id => document.getElementById(id);
+    const setupEl = $('setup');
+    const callUi = $('call-ui');
+    const statusEl = $('status');
+    const callStatusEl = $('callStatus');
+    const myIdInput = $('myId');
+    const remoteIdInput = $('remoteId');
+    const timerInput = $('timerMinutes');
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+    function setCallStatus(msg) {
+      callStatusEl.textContent = msg;
+    }
+
+    // ---------- Inactivity timer ----------
+    function resetActivity() {
+      lastActivity = Date.now();
+    }
+    ['mousemove', 'keydown', 'touchstart', 'click'].forEach(evt => {
+      document.addEventListener(evt, resetActivity, { passive: true });
+    });
+
+    function startInactivityWatch() {
+      stopInactivityWatch();
+      const minutes = parseInt(timerInput.value, 10) || 0;
+      if (minutes <= 0) return;
+
+      inactivityTimer = setInterval(() => {
+        const idleMs = Date.now() - lastActivity;
+        const limitMs = minutes * 60 * 1000;
+        if (idleMs >= limitMs) {
+          setCallStatus('Inactivity timeout – ending…');
+          endCallAndRedirect();
+        } else {
+          const left = Math.ceil((limitMs - idleMs) / 60000);
+          setCallStatus(`Inactivity timer: ~${left} min left`);
+        }
+      }, 15000); // check every 15 s
+    }
+    function stopInactivityWatch() {
+      if (inactivityTimer) {
+        clearInterval(inactivityTimer);
+        inactivityTimer = null;
+      }
+    }
+
+    // ---------- Core end + redirect ----------
+    function endCallAndRedirect() {
+      stopInactivityWatch();
+
+      if (currentCall) {
+        try { currentCall.close(); } catch (e) {}
+        currentCall = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+      if (peer) {
+        try { peer.destroy(); } catch (e) {}
+        peer = null;
+      }
+
+      // Replace so history doesn’t keep the call page
+      window.location.replace(REDIRECT_URL);
+    }
+
+    // ---------- Media helpers ----------
+    async function getLocalStream() {
+      if (localStream) return localStream;
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      $('localVideo').srcObject = localStream;
+      return localStream;
+    }
+
+    function toggleMute() {
+      if (!localStream) return;
+      isMuted = !isMuted;
+      localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+      $('muteBtn').textContent = isMuted ? 'Unmute' : 'Mute';
+      $('muteBtn').classList.toggle('active', isMuted);
+    }
+
+    function toggleCam() {
+      if (!localStream) return;
+      isCamOff = !isCamOff;
+      localStream.getVideoTracks().forEach(t => t.enabled = !isCamOff);
+      $('camBtn').textContent = isCamOff ? 'Camera On' : 'Camera Off';
+      $('camBtn').classList.toggle('active', isCamOff);
+    }
+
+    // ---------- PeerJS setup ----------
+    function initPeer() {
+      peer = new Peer({
+        // uses the free public PeerJS cloud by default
+        debug: 1
+      });
+
+      peer.on('open', id => {
+        myIdInput.value = id;
+        setStatus('Ready. Share your ID or call them.');
+      });
+
+      peer.on('error', err => {
+        console.error(err);
+        setStatus('Error: ' + err.type);
+      });
+
+      peer.on('call', async (call) => {
+        setStatus('Incoming call… answering');
+        try {
+          const stream = await getLocalStream();
+          call.answer(stream);
+          handleCall(call);
+        } catch (e) {
+          setStatus('Could not get camera/mic: ' + e.message);
+        }
+      });
+    }
+
+    function handleCall(call) {
+      currentCall = call;
+      setupEl.classList.add('hidden');
+      callUi.classList.remove('hidden');
+      setCallStatus('Connected');
+      resetActivity();
+      startInactivityWatch();
+
+      call.on('stream', remoteStream => {
+        $('remoteVideo').srcObject = remoteStream;
+      });
+
+      call.on('close', () => {
+        // Remote ended the call → we also redirect
+        endCallAndRedirect();
+      });
+
+      call.on('error', err => {
+        console.error(err);
+        endCallAndRedirect();
+      });
+    }
+
+    // ---------- UI buttons ----------
+    $('copyIdBtn').onclick = () => {
+      myIdInput.select();
+      navigator.clipboard.writeText(myIdInput.value).then(() => {
+        setStatus('ID copied!');
+      });
+    };
+
+    $('callBtn').onclick = async () => {
+      const remoteId = remoteIdInput.value.trim();
+      if (!remoteId) {
+        setStatus('Enter their ID first');
+        return;
+      }
+      try {
+        const stream = await getLocalStream();
+        const call = peer.call(remoteId, stream);
+        handleCall(call);
+      } catch (e) {
+        setStatus('Could not start call: ' + e.message);
+      }
+    };
+
+    $('muteBtn').onclick = toggleMute;
+    $('camBtn').onclick = toggleCam;
+    $('endBtn').onclick = endCallAndRedirect;
+
+    // Start
+    initPeer();
+  </script>
+</body>
+</html>
